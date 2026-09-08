@@ -1,29 +1,33 @@
 # ---------- Build stage ----------
-# Use the slim Rust image (Debian-based) to compile the application
 FROM rust:1.92-slim AS builder
 
-# Set the working directory inside the container
 WORKDIR /usr/src/app
 
-# Copy Cargo manifests first (better Docker cache usage)
+# Copy manifests + dummy src for dep caching
 COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && echo 'fn main() { println!("placeholder"); }' > src/main.rs
+RUN cargo build --release && rm -rf src target/release/hello_rust target/release/deps/hello_rust*
 
-# Copy the actual application source code
+# Copy real source and rebuild only the app
 COPY src ./src
-
-# Build the final application binary in release mode
 RUN cargo build --release
 
 # ---------- Runtime stage ----------
-# Use a minimal Debian image compatible with glibc
 FROM debian:trixie-slim
 
-# Set working directory
+# Run as non-root
+RUN groupadd --gid 1000 app && useradd --uid 1000 --gid app --shell /bin/false app
+
 WORKDIR /app
 
-# Copy the compiled binary from the builder stage
-COPY --from=builder /usr/src/app/target/release/hello_rust .
+COPY --from=builder /usr/src/app/target/release/hello_rust ./
 
-# Run the compiled Rust binary
+RUN chown app:app ./hello_rust
+
+USER app
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD ["./hello_rust"]
+
 CMD ["./hello_rust"]
 
